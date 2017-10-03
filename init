@@ -1,0 +1,240 @@
+#!/bin/busybox sh
+
+start() {
+    mount -t proc none /proc
+    mount -t sysfs none /sys
+    mount -t devtmpfs none /dev
+    [ -d /dev/pts ] || mkdir -p /dev/pts
+    mount -t devpts devpts /dev/pts
+
+    echo 0 > /proc/sys/kernel/printk
+
+    echo_debug "Booting $(uname -srm)"
+
+    make_etc_passwd
+    echo "root:root" | chpasswd 2>&1 > /dev/null
+    touch /var/log/lastlog
+    loadkmap < /root/.keymap
+    
+    setupnetwork && printnetwork
+
+    parsecryptsetup
+    startdropbear
+    cryptsetupkeyfile
+    cryptsetupprompt
+    killall -9 dropbear
+
+    mountroot || (echo_error "No rootfs found (root=/dev/sdXY)" && rescue_shell)
+
+    maybreakinit
+
+    unconfigurenetwork
+    parserealinit
+
+    echo_debug "exec switch_root to $rinit"
+
+    umount /dev/pts
+    mount --move /proc /mnt/root/proc
+    mount --move /sys /mnt/root/sys
+    mount --move /dev /mnt/root/dev
+
+    exec switch_root /mnt/root $rinit
+}
+
+echo_debug() {
+    #return
+    echo -ne "\033[01;32m" # green
+    echo $@ >&2
+    echo -ne "\033[00m"
+}
+
+echo_warn() {
+    echo -ne "\033[01;33m" # yellow
+    echo $@ >&2
+    echo -ne "\033[00m"
+}
+
+echo_error() {
+    echo -ne "\033[01;31m" # red
+    echo $@ >&2
+    echo -ne "\033[00m"
+    rescue_shell
+}
+
+rescue_shell() {
+    /bin/busybox --install -s
+    /bin/sh
+}
+
+make_etc_passwd() {
+    echo 'root:x:0:0:root:/root:/bin/dropbearshell' > /etc/passwd
+    echo '/bin/dropbearshell' > /etc/shells
+}
+
+parsecryptsetup() {
+    cryptroot=$(cat /proc/cmdline | egrep -o " crypt_root=[^ ]*" | cut -d' ' -f2)       
+    if [ ! -z $cryptroot ]; then
+        cryptdev=$(echo $cryptroot | cut -d= -f2 | cut -d: -f1)
+        cryptname=$(echo $cryptroot | cut -d: -f2)
+        cryptargs=$(echo $cryptroot | cut -d: -f3)
+        if [ "$cryptdev" = "LABEL" ] || [ "$cryptdev" = "UUID" ] ; then
+            uuid=$(echo $cryptroot | cut -d= -f3 | cut -d: -f1)
+            cryptdev=$(findfs "$cryptdev"="$uuid")
+        fi
+        if [ "$cryptname" = "$cryptroot" ]; then
+            cryptname="root"
+        fi
+        if [ "$cryptargs" = "trim" ]; then
+            cryptargs="--batch-mode --allow-discards"
+        else
+            cryptargs="--batch-mode"
+        fi
+        
+        echo $cryptdev > /.cryptdev
+        echo $cryptname > /.cryptname
+        echo $cryptargs > /.cryptargs
+        export cryptdev
+        export cryptname
+        export cryptargs
+    fi
+}
+
+startdropbear() {
+    if [ ! -z $cryptdev ]; then
+        /bin/dropbear -j -k 2>&1 > /dev/null
+    fi
+}
+
+cryptsetupkeyfile() {
+    if [ ! -z $cryptdev ]; then
+        ocryptkey=$(cat /proc/cmdline | egrep -o " cryptkey=[^ ]*" | cut -d' ' -f2)       
+        if [ ! -z $ocryptkey ]; then
+            keydev=$(echo $ocryptkey | cut -d= -f2 | cut -d: -f1)
+            keyarg=$(echo $ocryptkey | cut -d: -f2)
+            keylength=$(echo $ocryptkey | cut -d: -f3)
+            if [ "$keydev" = "LABEL" ] || [ "$keydev" = "UUID" ] ; then
+                uuid=$(echo $ocryptkey | cut -d= -f3 | cut -d: -f1)
+                keydev=$(findfs "$keydev"="$uuid")
+            fi
+            re='^[0-9]+$'
+            if [ -z $keyarg ]; then
+                echo_error "No cryptkey file or range defined"
+            fi
+            if [[ $keyarg =~ $re ]] && [[ $keylength =~ $re ]]; then
+                dd if=$keydev of=/.cryptkey bs=1 skip=$keyarg count=$keylength
+            elif [[ $keyarg =~ $re ]] && ! [[ $keylength =~ $re ]]; then
+                echo_error "No cryptkey length defined"
+            else
+                mkdir -p /mnt/kd
+                mount $keydev /mnt/kd
+                cp /mnt/kd/$keyarg /.cryptkey
+                umount /mnt/kd
+            fi
+            
+            if [[ $keyarg =~ $re ]] && [[ $keylength =~ $re ]]; then
+                echo_debug "Decrypting $cryptdev ($uuid) using keyfile from bytes ($keyarg:$keylength) to $cryptname"
+            else
+                echo_debug "Decrypting $cryptdev ($uuid) using keyfile ($keyarg) to $cryptname"
+            fi
+            cryptsetup luksOpen -T 0 --key-file /.cryptkey $cryptargs $cryptdev $cryptname
+        fi
+    fi
+}
+
+cryptsetupprompt() {
+    if [ ! -z $cryptdev ] && [ ! -b /dev/mapper/$cryptname ]; then
+        echo_debug "Decrypting $cryptdev ($uuid) to $cryptname"
+        cryptsetup luksOpen -T 999 $cryptargs $cryptdev $cryptname
+    fi
+}
+
+mountroot() {
+    root=$(cat /proc/cmdline | egrep -o " root=[^ ]*" | cut -d' ' -f2)
+    if [ ! -z $root ]; then
+        dev=$(echo $root | cut -d= -f2)
+        if [ "$dev" == "LABEL" ] || [ "$dev" == "UUID" ] ; then
+            uuid=$(echo $root | cut -d= -f3)
+            dev=$(findfs "$dev"="$uuid")
+        fi
+        
+        rootflags=$(cat /proc/cmdline | egrep -o " rootflags=[^ ]*" | cut -d' ' -f2)
+        if [ ! -z $rootflags ]; then
+            rootflags="ro,$(echo $rootflags | cut -d= -f2-)"
+        else
+            rootflags="ro"
+        fi
+        
+        echo_debug "Mounting rootfs $dev with $rootflags"
+        mount -o $rootflags $dev /mnt/root
+    else
+        return 1
+    fi
+}
+
+printnetwork() {
+    ipstr=$(cat /proc/cmdline | egrep -o " net=[^ ]*" | cut -d' ' -f2)
+    if [ ! -z $ipstr ]; then
+        cidr=$(echo $ipstr | cut -d= -f2 | cut -d: -f1)
+        gw=$(echo $ipstr | cut -d= -f2 | cut -d: -f2)
+        dns=$(echo $ipstr | cut -d= -f2 | cut -d: -f3)
+        dev=$(echo $ipstr | cut -d= -f2 | cut -d: -f4)
+        echo_debug "Network configured for remote unlocking:"
+        echo_debug "    IP: $cidr @$dev"
+        echo_debug "    GW: $gw, DNS: $dns"
+        echo ""
+    fi
+}
+
+setupnetwork() {
+    ipstr=$(cat /proc/cmdline | egrep -o " net=[^ ]*" | cut -d' ' -f2)
+    if [ ! -z $ipstr ]; then
+        cidr=$(echo $ipstr | cut -d= -f2 | cut -d: -f1)
+        gw=$(echo $ipstr | cut -d= -f2 | cut -d: -f2)
+        dns=$(echo $ipstr | cut -d= -f2 | cut -d: -f3)
+        dev=$(echo $ipstr | cut -d= -f2 | cut -d: -f4)
+        ip addr add $cidr dev $dev
+        ip link set dev $dev up
+        echo "nameserver $dns" > /etc/resolv.conf
+        while [ $(ip route | wc -l) -eq 0 ]; do
+            sleep 0.1
+        done
+        ip route add default via $gw
+    fi
+}
+
+unconfigurenetwork() {
+    ipstr=$(cat /proc/cmdline | egrep -o " net=[^ ]*" | cut -d' ' -f2)
+    if [ ! -z $ipstr ]; then
+        dev=$(echo $ipstr | cut -d= -f2 | cut -d: -f4)
+        ip addr flush dev $dev
+        ip route del default
+        echo "" > /etc/resolv.conf
+    fi
+}
+
+maybreakinit() {
+    breakset=$(cat /proc/cmdline | egrep -o " breakinit=[^ ]*" | cut -d' ' -f2)
+    if [ "$breakset" = "breakinit=y" ]; then
+        echo_warn "breakinit=y, stopping switch_root, whatever you want to do, do it now. Exiting this shell will continue boot."
+        rescue_shell
+    fi
+}
+
+parserealinit() {
+    real_init=$(cat /proc/cmdline | egrep -o " real_init=[^ ]*" | cut -d' ' -f2)
+    if [ ! -z $real_init ] && [ -f /mnt/root/$real_init ]; then
+        export rinit=$real_init
+    else
+        if [ -f /mnt/root/usr/lib/systemd/systemd ]; then
+            export rinit="/usr/lib/systemd/systemd"
+        elif [ -f /mnt/root/sbin/init ]; then
+            export rinit="/sbin/init"
+        elif [ -f /mnt/root/init ]; then
+            export rinit="/init"
+        else
+            echo_error "Unable to find/detect real_init"
+        fi
+    fi
+}
+
+start

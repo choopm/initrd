@@ -1,0 +1,63 @@
+# directory structure
+dir /bin          755 0 0
+dir /dev          755 0 0
+dir /etc          755 0 0
+dir /etc/dropbear 755 0 0
+dir /lib          755 0 0
+dir /lib32        755 0 0
+dir /lib64        755 0 0
+dir /mnt          755 0 0
+dir /mnt/root     755 0 0
+dir /proc         755 0 0
+dir /root         700 0 0
+dir /root/.ssh    755 0 0
+dir /sbin         755 0 0
+dir /sys          755 0 0
+dir /usr          755 0 0
+dir /usr/lib64    755 0 0
+dir /var          755 0 0
+dir /var/log      755 0 0
+
+# init script
+file /init /usr/src/initramfs/init 755 0 0
+file /bin/dropbearshell /usr/src/initramfs/dropbearshell 755 0 0
+file /etc/dropbear/dropbear_rsa_host_key /usr/src/initramfs/dropbear_rsa_host_key 600 0 0
+file /etc/dropbear/dropbear_dss_host_key /usr/src/initramfs/dropbear_dss_host_key 600 0 0
+file /etc/dropbear/dropbear_ecdsa_host_key /usr/src/initramfs/dropbear_ecdsa_host_key 600 0 0
+file /root/.keymap /usr/src/initramfs/keymap 644 0 0
+file /root/.ssh/authorized_keys /usr/src/initramfs/authorized_keys 644 0 0
+
+file /bin/busybox /bin/busybox 755 0 0
+file /bin/cryptsetup /sbin/cryptsetup 755 0 0
+file /bin/dropbear /usr/sbin/dropbear 755 0 0
+file /bin/ldd /usr/bin/ldd 755 0 0
+file /bin/strace /usr/bin/strace 755 0 0
+
+# generate dynamic linkings:
+# for i in $(lddtree /sbin/cryptsetup | cut -d'=' -f2 | cut -d' ' -f2 | grep lib | sort | uniq); do echo file $i $i 755 0 0; done
+
+# cryptsetup
+file /lib64/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2 755 0 0
+file /lib64/libattr.so.1 /lib64/libattr.so.1 755 0 0
+file /lib64/libcap.so.2 /lib64/libcap.so.2 755 0 0
+file /lib64/libc.so.6 /lib64/libc.so.6 755 0 0
+file /lib64/libdevmapper.so.1.02 /lib64/libdevmapper.so.1.02 755 0 0
+file /lib64/libm.so.6 /lib64/libm.so.6 755 0 0
+file /lib64/libpthread.so.0 /lib64/libpthread.so.0 755 0 0
+file /lib64/librt.so.1 /lib64/librt.so.1 755 0 0
+file /lib64/libuuid.so.1 /lib64/libuuid.so.1 755 0 0
+file /usr/lib64/libcryptsetup.so.4 /usr/lib64/libcryptsetup.so.4 755 0 0
+file /usr/lib64/libgcrypt.so.20 /usr/lib64/libgcrypt.so.20 755 0 0
+file /usr/lib64/libgpg-error.so.0 /usr/lib64/libgpg-error.so.0 755 0 0
+file /usr/lib64/libpopt.so.0 /usr/lib64/libpopt.so.0 755 0 0
+file /usr/lib64/libudev.so.1 /usr/lib64/libudev.so.1 755 0 0
+
+# dropbear
+file /lib64/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2 755 0 0
+file /lib64/libcrypt.so.1 /lib64/libcrypt.so.1 755 0 0
+file /lib64/libc.so.6 /lib64/libc.so.6 755 0 0
+file /lib64/libutil.so.1 /lib64/libutil.so.1 755 0 0
+# dropbear @runtime
+file /lib64/libnsl.so.1 /lib64/libnsl.so.1 755 0 0
+file /lib64/libnss_compat.so.2 /lib64/libnss_compat.so.2 755 0 0
+file /lib64/libnss_files.so.2 /lib64/libnss_files.so.2 755 0 0

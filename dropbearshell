@@ -1,0 +1,8 @@
+#!/bin/busybox sh
+if [ -f "/.cryptdev" ] && [ ! -b /dev/mapper/$cryptname ]; then
+    if eval /bin/cryptsetup luksOpen -T 2 \`cat /.cryptargs\` \`cat /.cryptdev\` \`cat /.cryptname\` ; then
+        killall -9 cryptsetup
+    fi
+else
+    echo "Init isn't ready yet, please wait"
+fi
