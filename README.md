@@ -24,7 +24,7 @@ LABEL gentoo
 
 ## Usage:
 If specified, the init will try to use the keyfile to open your luks container (defined by crypt_root=).
-If there's no keyfile defined, or it's unavaiable, you will be prompted for a password.
+If there's no keyfile defined, or it's unavailable (init is waiting 5 seconds for the device), you will be prompted for a password.
 In the meantime, you may login via SSH, either by `root:root` or public-key defined in [authorized_keys](authorized_keys) (user:pass configureable or deactivatable by -s in [init](init)).
 As soon as the luks containers opens, everything is cleaned up, your specified `root=` is mounted and it's switch_root'ed to.
 
@@ -34,6 +34,6 @@ As soon as the luks containers opens, everything is cleaned up, your specified `
 * `real_init=/sbin/init` - optional, what to start when switch_root'ing. Auto-detection for openrc and systemd.
 * `rootflags=rw,subvol=snap/backup,noatime` - optional, mount options for your rootfs
 * `crypt_root=<blockdev>:<optional dm-name>:<optional trim>` - optional, either a block device or a UUID may be given, second part can be used to specfiy the `/dev/mapper/xyz` name, third argument `trim` allows discards (SSD) to be passed
-* `cryptkey=/dev/sdb1:pic/me.png` or `cryptkey=/dev/sdb:2048:4096` - optional, the second variant gets the bytes 2048-6144 and uses them as a keyfile
+* `cryptkey=/dev/sdb1:pic/me.png` or `cryptkey=/dev/sdb:2048:4096` - optional, the second variant gets 4096 bytes of sdb, skipping the first 2048 (2049-6145) and uses them as a keyfile
 * `net=<cidr>:<gateway>:<dns>:<dev>` - optional, network settings during booting (for SSH remote unlocking)
 * `breakinit=y` - optional, if set, drops you to shell after unlocking and mounting the rootfs

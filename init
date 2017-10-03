@@ -106,23 +106,38 @@ startdropbear() {
 }
 
 cryptsetupkeyfile() {
+    maxwait=50 #50 * 0.1s -> 5s
     if [ ! -z $cryptdev ]; then
         ocryptkey=$(cat /proc/cmdline | egrep -o " cryptkey=[^ ]*" | cut -d' ' -f2)       
         if [ ! -z $ocryptkey ]; then
             keydev=$(echo $ocryptkey | cut -d= -f2 | cut -d: -f1)
             keyarg=$(echo $ocryptkey | cut -d: -f2)
             keylength=$(echo $ocryptkey | cut -d: -f3)
-            if [ "$keydev" = "LABEL" ] || [ "$keydev" = "UUID" ] ; then
+            count=0
+            if [ "$keydev" = "LABEL" ] || [ "$keydev" = "UUID" ]; then
                 uuid=$(echo $ocryptkey | cut -d= -f3 | cut -d: -f1)
-                keydev=$(findfs "$keydev"="$uuid")
+                type=$keydev
+                while [ ! -b $keydev ] && [ $count -le $maxwait ]; do
+                    sleep 0.1
+                    keydev=$(findfs "$type"="$uuid")
+                    count=$((count + 1))
+                done
+            else
+                while [ ! -b $keydev ] && [ $count -le $maxwait ]; do
+                    sleep 0.1
+                    count=$((count + 1))
+                done
             fi
-            re='^[0-9]+$'
+            if [ $count -eq $maxwait ] || [ $count -gt $maxwait ]; then
+                echo_warn "Cryptkey device not found, falling back to password prompt"
+                return
+            fi
             if [ -z $keyarg ]; then
                 echo_error "No cryptkey file or range defined"
             fi
-            if [[ $keyarg =~ $re ]] && [[ $keylength =~ $re ]]; then
+            if [ ! -z $(echo -n $keyarg | egrep '^[0-9]+$') ] && [ ! -z $(echo -n $keylength | egrep '^[0-9]+$') ]; then
                 dd if=$keydev of=/.cryptkey bs=1 skip=$keyarg count=$keylength
-            elif [[ $keyarg =~ $re ]] && ! [[ $keylength =~ $re ]]; then
+            elif [ ! -z $(echo -n $keyarg | egrep '^[0-9]+$') ] && [ -z $(echo -n $keylength | egrep '^[0-9]+$') ]; then
                 echo_error "No cryptkey length defined"
             else
                 mkdir -p /mnt/kd
@@ -131,12 +146,13 @@ cryptsetupkeyfile() {
                 umount /mnt/kd
             fi
             
-            if [[ $keyarg =~ $re ]] && [[ $keylength =~ $re ]]; then
+            if [ ! -z $(echo -n $keyarg | egrep '^[0-9]+$') ] && [ ! -z $(echo -n $keylength | egrep '^[0-9]+$') ]; then
                 echo_debug "Decrypting $cryptdev ($uuid) using keyfile from bytes ($keyarg:$keylength) to $cryptname"
             else
                 echo_debug "Decrypting $cryptdev ($uuid) using keyfile ($keyarg) to $cryptname"
             fi
             cryptsetup luksOpen -T 0 --key-file /.cryptkey $cryptargs $cryptdev $cryptname
+            rm /.cryptkey
         fi
     fi
 }
